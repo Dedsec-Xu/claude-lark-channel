@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "lark-channel": {
+      "command": "bun",
+      "args": [
+        "/path/to/claude-lark-channel/index.ts"
+      ],
+      "env": {
+        "LARK_APP_ID": "your_app_id_here",
+        "LARK_APP_SECRET": "your_app_secret_here",
+        "LARK_BRAND": "feishu"
+      }
+    }
+  }
+}
