@@ -366,11 +366,15 @@ const PermissionRequestSchema = z.object({
 // Store the last active chat for permission prompts
 let lastActiveChatId: string | null = null
 
+// Map permission message_id → request_id for reaction-based approval
+const permissionMessages = new Map<string, string>()
+const PERMISSION_MSG_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
 mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
   if (!lastActiveChatId) return
   try {
-    const permText = `🔐 Claude wants to run **${params.tool_name}**: ${params.description}\n\nReply \`yes ${params.request_id}\` or \`no ${params.request_id}\``
-    await larkClient.im.message.create({
+    const permText = `🔐 Claude wants to run **${params.tool_name}**: ${params.description}\n\nReact **YES** to approve, **NO** to deny`
+    const res = await larkClient.im.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: lastActiveChatId,
@@ -380,6 +384,14 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
         }),
       } as any,
     })
+
+    // Store message_id → request_id mapping
+    const msgId = (res as any)?.data?.message_id ?? (res as any)?.message_id
+    if (msgId) {
+      permissionMessages.set(msgId, params.request_id)
+      // Auto-cleanup after TTL
+      setTimeout(() => permissionMessages.delete(msgId), PERMISSION_MSG_TTL_MS)
+    }
   } catch (err) {
     // Permission relay is best-effort
   }
@@ -452,8 +464,42 @@ function extractTextContent(msgType: string, content: string): string {
 async function startLarkWebSocket(): Promise<void> {
   const dispatcher = new Lark.EventDispatcher({})
 
-  // Register message handler
+  // Permission reaction emoji mappings
+  const APPROVE_EMOJIS = new Set(['THUMBSUP', 'YES', 'OK', 'DONE', 'MUSCLE', 'AGREE'])
+  const DENY_EMOJIS = new Set(['NO', 'THUMBSDOWN', 'WRONG', 'MINUS1'])
+
+  // Register message and reaction handlers
   dispatcher.register({
+    // Handle reaction events for permission relay
+    'im.message.reaction.created_v1': async (data: any) => {
+      try {
+        const messageId = data.message_id ?? ''
+        const emojiType = data.reaction_type?.emoji_type ?? ''
+
+        // Check if this reaction is on a permission message
+        const requestId = permissionMessages.get(messageId)
+        if (!requestId) return
+
+        let behavior: 'allow' | 'deny' | null = null
+        if (APPROVE_EMOJIS.has(emojiType)) {
+          behavior = 'allow'
+        } else if (DENY_EMOJIS.has(emojiType)) {
+          behavior = 'deny'
+        }
+
+        if (behavior) {
+          await mcp.notification({
+            method: 'notifications/claude/channel/permission' as any,
+            params: { request_id: requestId, behavior },
+          })
+          // Clean up after verdict
+          permissionMessages.delete(messageId)
+        }
+      } catch (err) {
+        console.error('Error handling reaction for permission:', err)
+      }
+    },
+
     'im.message.receive_v1': async (data: any) => {
       try {
         const event = data
