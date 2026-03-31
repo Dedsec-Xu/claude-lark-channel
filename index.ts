@@ -21,7 +21,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { z } from 'zod'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, createReadStream } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -240,6 +240,30 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['chat_id'],
       },
     },
+    {
+      name: 'lark_send_image',
+      description:
+        'Send a local image file to a Lark/Feishu conversation. Uploads the image first, then sends it. Supports JPEG, PNG, GIF, BMP, WEBP.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          chat_id: {
+            type: 'string',
+            description: 'The chat ID to send the image to',
+          },
+          file_path: {
+            type: 'string',
+            description: 'Absolute path to the local image file',
+          },
+          receive_id_type: {
+            type: 'string',
+            enum: ['chat_id', 'open_id'],
+            description: 'Type of the chat_id (default: chat_id)',
+          },
+        },
+        required: ['chat_id', 'file_path'],
+      },
+    },
   ],
 }))
 
@@ -338,6 +362,36 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return {
           content: [{ type: 'text', text: JSON.stringify(items, null, 2) }],
         }
+      }
+
+      case 'lark_send_image': {
+        const chatId = params.chat_id as string
+        const filePath = params.file_path as string
+        const receiveIdType = (params.receive_id_type as string) || 'chat_id'
+
+        // Upload image to Feishu
+        const imageStream = createReadStream(filePath)
+        const uploadRes = await larkClient.im.image.create({
+          data: { image_type: 'message', image: imageStream as any },
+        })
+
+        const imageKey =
+          (uploadRes as any)?.data?.image_key ??
+          (uploadRes as any)?.image_key
+        if (!imageKey) {
+          throw new Error('Image upload failed: no image_key returned')
+        }
+
+        // Send image message
+        await larkClient.im.message.create({
+          params: { receive_id_type: receiveIdType },
+          data: {
+            receive_id: chatId,
+            msg_type: 'image',
+            content: JSON.stringify({ image_key: imageKey }),
+          } as any,
+        })
+        return { content: [{ type: 'text', text: `sent (image_key: ${imageKey})` }] }
       }
 
       default:
