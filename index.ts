@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Claude Code Lark/Feishu Channel Plugin
+ * Claude Code Lark/Feishu Channel Plugin v0.2.0
  *
  * An MCP server that bridges Lark/Feishu messaging with Claude Code.
  * Uses Lark SDK WebSocket for real-time message reception and
@@ -464,9 +464,11 @@ function extractTextContent(msgType: string, content: string): string {
 async function startLarkWebSocket(): Promise<void> {
   const dispatcher = new Lark.EventDispatcher({})
 
-  // Permission reaction emoji mappings
-  const APPROVE_EMOJIS = new Set(['THUMBSUP', 'YES', 'OK', 'DONE', 'MUSCLE', 'AGREE'])
-  const DENY_EMOJIS = new Set(['NO', 'THUMBSDOWN', 'WRONG', 'MINUS1'])
+  // Permission reaction emoji mappings (case-sensitive Feishu emoji types)
+  // [赞] THUMBSUP, [Yes] Yes, [OK] OK, [勾号] CheckMark, [+1] JIAYI, [我看行] LGTM, [完成] DONE, [肌肉] MUSCLE
+  const APPROVE_EMOJIS = new Set(['THUMBSUP', 'Yes', 'OK', 'CheckMark', 'JIAYI', 'DONE', 'MUSCLE', 'LGTM', 'FINGERHEART', 'Get', 'OnIt'])
+  // [No] No, [叉号] CrossMark, [踩] ThumbsDown, [-1] MinusOne, [皱眉] FROWN
+  const DENY_EMOJIS = new Set(['No', 'CrossMark', 'ThumbsDown', 'MinusOne', 'FROWN'])
 
   // Register message and reaction handlers
   dispatcher.register({
