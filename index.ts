@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Claude Code Lark/Feishu Channel Plugin v0.3.0
+ * Claude Code Lark/Feishu Channel Plugin
  *
  * An MCP server that bridges Lark/Feishu messaging with Claude Code.
  * Uses Lark SDK WebSocket for real-time message reception and
