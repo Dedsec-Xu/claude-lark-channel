@@ -254,19 +254,29 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const text = params.text as string
         const replyTo = params.reply_to as string | undefined
 
-        const body: Record<string, unknown> = {
-          receive_id: chatId,
-          msg_type: 'text',
-          content: JSON.stringify({ text }),
-        }
-        if (replyTo) {
-          // Not a standard field in create — use reply_in_thread via the reply API
-        }
-
-        await larkClient.im.message.create({
-          params: { receive_id_type: 'chat_id' },
-          data: body as any,
+        // Use post format with md tag for markdown rendering
+        const content = JSON.stringify({
+          zh_cn: {
+            content: [[{ tag: 'md', text }]],
+          },
         })
+
+        if (replyTo) {
+          // Reply in thread
+          await larkClient.im.message.reply({
+            path: { message_id: replyTo },
+            data: { content, msg_type: 'post' },
+          })
+        } else {
+          await larkClient.im.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              msg_type: 'post',
+              content,
+            } as any,
+          })
+        }
         return { content: [{ type: 'text', text: 'sent' }] }
       }
 
@@ -286,12 +296,19 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const receiveIdType = (params.receive_id_type as string) || 'chat_id'
         const text = params.text as string
 
+        // Use post format with md tag for markdown rendering
+        const sendContent = JSON.stringify({
+          zh_cn: {
+            content: [[{ tag: 'md', text }]],
+          },
+        })
+
         await larkClient.im.message.create({
           params: { receive_id_type: receiveIdType },
           data: {
             receive_id: receiveId,
-            msg_type: 'text',
-            content: JSON.stringify({ text }),
+            msg_type: 'post',
+            content: sendContent,
           } as any,
         })
         return { content: [{ type: 'text', text: 'sent' }] }
@@ -352,13 +369,14 @@ let lastActiveChatId: string | null = null
 mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
   if (!lastActiveChatId) return
   try {
+    const permText = `🔐 Claude wants to run **${params.tool_name}**: ${params.description}\n\nReply \`yes ${params.request_id}\` or \`no ${params.request_id}\``
     await larkClient.im.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
         receive_id: lastActiveChatId,
-        msg_type: 'text',
+        msg_type: 'post',
         content: JSON.stringify({
-          text: `🔐 Claude wants to run ${params.tool_name}: ${params.description}\n\nReply "yes ${params.request_id}" or "no ${params.request_id}"`,
+          zh_cn: { content: [[{ tag: 'md', text: permText }]] },
         }),
       } as any,
     })
