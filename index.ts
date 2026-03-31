@@ -264,6 +264,33 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['chat_id', 'file_path'],
       },
     },
+    {
+      name: 'lark_wiki_create_node',
+      description:
+        'Create a new document node in a Feishu wiki space. Can create under a parent node (folder) or at the root of the space.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          space_id: {
+            type: 'string',
+            description: 'Wiki space ID',
+          },
+          parent_node_token: {
+            type: 'string',
+            description: 'Parent node token (folder to create under). Empty string for root.',
+          },
+          title: {
+            type: 'string',
+            description: 'Title of the new document',
+          },
+          markdown: {
+            type: 'string',
+            description: 'Markdown content for the document body (optional)',
+          },
+        },
+        required: ['space_id', 'parent_node_token', 'title'],
+      },
+    },
   ],
 }))
 
@@ -392,6 +419,82 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           } as any,
         })
         return { content: [{ type: 'text', text: `sent (image_key: ${imageKey})` }] }
+      }
+
+      case 'lark_wiki_create_node': {
+        const spaceId = params.space_id as string
+        const parentNodeToken = params.parent_node_token as string
+        const title = params.title as string
+        const markdown = params.markdown as string | undefined
+
+        // Step 1: Create a docx first if markdown content provided
+        let objToken: string | undefined
+        let objType = 'docx'
+
+        if (markdown) {
+          // Use Lark API to create a document via import
+          const truncatedTitle = title.length > 27 ? title.slice(0, 27) : title
+          const importRes = await (larkClient as any).request({
+            method: 'POST',
+            url: '/open-apis/docx/v1/documents',
+            data: { title },
+          })
+          objToken = (importRes as any)?.data?.document?.document_id
+        }
+
+        // Step 2: Create wiki node
+        const nodeData: Record<string, unknown> = {
+          obj_type: objType,
+          parent_node_token: parentNodeToken || undefined,
+          title,
+        }
+        if (objToken) {
+          nodeData.obj_token = objToken
+        }
+
+        const res = await (larkClient as any).request({
+          method: 'POST',
+          url: `/open-apis/wiki/v2/spaces/${spaceId}/nodes`,
+          data: nodeData,
+        })
+
+        const node = (res as any)?.data?.node
+        const nodeToken = node?.node_token ?? ''
+        const nodeObjToken = node?.obj_token ?? objToken ?? ''
+
+        // Step 3: If markdown content, write to the created document
+        if (markdown && nodeObjToken) {
+          try {
+            // Create document blocks with markdown content
+            // Use the post format with md tag approach via rich text
+            await (larkClient as any).request({
+              method: 'POST',
+              url: `/open-apis/docx/v1/documents/${nodeObjToken}/blocks/batch_update`,
+              data: {
+                requests: [{
+                  block_id: nodeObjToken,
+                  replace_content: {
+                    content: markdown,
+                  },
+                }],
+              },
+            })
+          } catch {
+            // Writing content may fail, but the node is still created
+          }
+        }
+
+        const wikiUrl = `https://vcn6g2he0hep.feishu.cn/wiki/${nodeToken}`
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              node_token: nodeToken,
+              obj_token: nodeObjToken,
+              url: wikiUrl,
+            }, null, 2),
+          }],
+        }
       }
 
       default:
